@@ -1,0 +1,127 @@
+version: '3.8'
+networks:
+  middleware-net:
+    name: middleware-net
+    driver: bridge
+volumes:
+  realtimegame.queue.volume:
+    external: false
+services:
+  realtimegame.webapi:
+    container_name: realtimegame_webapi
+    image: ${DOCKER_REGISTRY-}realtimegamewebapi
+    build:
+      context: .
+      dockerfile: src/back/Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+      - ASPNETCORE_HTTPS_PORTS=8081
+    ports:
+      - "8080"
+      - "8081"
+    volumes:
+      - ${APPDATA}/Microsoft/UserSecrets:/home/app/.microsoft/usersecrets:ro
+      - ${APPDATA}/ASP.NET/Https:/home/app/.aspnet/https:ro
+    networks:
+      - middleware-net
+    depends_on:
+      - realtimegame.database
+
+  realtimegame.database:
+    container_name: realtimegame_database
+    image: postgres:13
+
+    environment:
+      POSTGRES_DB: realtimegame
+      POSTGRES_USER: developer
+      POSTGRES_PASSWORD: developer
+    ports:
+      - 5432:5432
+    restart: unless-stopped
+    networks:
+      - middleware-net
+
+  realtimegame.nosql:
+    container_name: realtimegame_nosql 
+    image: mongo:8.0    
+    environment:
+        MONGO_INITDB_ROOT_USERNAME: developer
+        MONGO_INITDB_ROOT_PASSWORD: developer
+    ports:
+      - 27017:27017
+    networks:
+      - middleware-net
+  
+  realtimegame.cache:
+    container_name: realtimegame_cache 
+    image: redis:7.4.1-alpine     
+    command: redis-server --requirepass developer
+    environment:
+       MONGO_INITDB_ROOT_USERNAME: developer
+       MONGO_INITDB_ROOT_PASSWORD: developer
+    ports:
+       - 6379:6379
+    networks:
+      - middleware-net
+
+  realtimegame.queue:
+    image: rabbitmq:3-management
+    container_name: 'realtimegame_queue'
+    ports:
+        - 5672:5672
+        - 15672:15672
+    environment:
+      - RABBITMQ_DEFAULT_PASS=developer
+      - RABBITMQ_DEFAULT_USER=developer
+      - RABBITMQ_PASSWORD=developer
+      - RABBITMQ_USERNAME=developer
+    volumes:
+        - realtimegame.queue.volume:/var/lib/rabbitmq/
+        - realtimegame.queue.volume:/var/log/rabbitmq
+    networks:
+        - middleware-net  
+
+  realtimegame.nosqladmin:
+    container_name: 'realtimegame_nosql_admin'
+    image: mongo-express
+    restart: always
+    ports:
+      - 8087:8081
+    depends_on:
+      - realtimegame.nosql
+    environment:
+      - ME_CONFIG_MONGODB_ADMINUSERNAME = root
+      - ME_CONFIG_MONGODB_ADMINPASSWORD = developer
+      - ME_CONFIG_MONGODB_URL = "mongodb://realtimegame_nosql:27017"
+      - ME_CONFIG_MONGODB_SERVER = mongo
+      - ME_CONFIG_MONGODB_PORT = 27017
+      - ME_CONFIG_MONGODB_ENABLE_ADMIN = true
+      - ME_CONFIG_BASICAUTH_USERNAME = developer
+      - ME_CONFIG_BASICAUTH_PASSWORD = developer
+    networks:
+        - middleware-net
+
+  realtimegame.dbadmin:
+    container_name: 'realtimegame_dbadmin'
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "developer@local.com"
+      PGADMIN_DEFAULT_PASSWORD: "developer"
+    ports:
+      - "16543:80"
+    depends_on:
+      - realtimegame.database
+    networks:
+      - middleware-net
+
+  realtimegame.cacheadmin:
+    container_name: 'realtimegame_cacheadmin'
+    image: rediscommander/redis-commander:latest
+    restart: always
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+        - middleware-net
